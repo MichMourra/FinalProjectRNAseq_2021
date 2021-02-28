@@ -25,10 +25,12 @@ Vemos cuales son los proyectos que podemos elegir.
 human_projects
 ```
 
-Para este caso elegimos el proyecto SRP173312 acerca de eventos de splicing alternativos sobre la regulación del eje hsa-miR-139-5p HNRNPF en nuestro sistema celular.
+Para este caso elegimos el proyecto SRP071965 acerca de la identificación de biomarcadores sanguíneos que predicen prospectivamente la progresión de la infección por Mycobacterium tuberculosis, esto con el proposito de poder detectar lo mas pronto posible la enfermedad.
+
+Estos estudios fueron realizados en Sudafrica y Gambia.
 
 Para mas información visita NCBI: 
-https://www.ncbi.nlm.nih.gov/sra/SRX3131578[accn]
+https://www.ncbi.nlm.nih.gov/sra/SRX2469204[accn]
 
 ```{r,message=FALSE}
 # Capturamos nuestro proyecto de interes
@@ -46,7 +48,7 @@ rse_gene_SRP071965
 ```
 
 
-Podemos ver que tenemos 63856 genes en 12 muestras 
+Podemos ver que tenemos 63856 genes en 355 muestras 
 
 Con compute_read_counts obtendremos el numero de lecturas para cada una de las muestras en lugar de los datos a nivel de nucleotidos.
 
@@ -57,18 +59,17 @@ assay(rse_gene_SRP071965 , "counts") <- compute_read_counts(rse_gene_SRP071965)
 
 ## Exploramos nuestros datos
 
-Revisamos la información contenida en las columnas
+Si queremos revisar la información contenida en las columnas
 
 ```{r,eval=FALSE}
 head(colData(rse_gene_SRP071965))
 ```
 
-Revisamos la información contenida en rowData
+Si queremos revisar la información contenida en rowData
 
 ```{r,eval=FALSE}
 rowData(rse_gene_SRP071965)
 ```
-
 
 La variable de sra.sample_attributes, nos permite ver si la información viene diferente entre las muestras.
 
@@ -81,10 +82,7 @@ rse_gene_SRP071965$sra.sample_attributes[1:4]
 library("edgeR")
 ```
 
-Podemos observar que aquellas lineas donde tuvieron un tratamiento con doxyciclina presentan un campo extra, razon por la cual debemos de eliminar este campo extra.
-
-
-Como la cantidad de campos es igual entre todas las muestras entonces si podemos correr expand_sra_attributes, vidualizando todas las que esten relacionadas con sra_attribute.
+Podemos observar que las lineas poseen la misma cantidad de campos, por lo que podemos proceder a observar la información contenida en las columnas
 
 ```{r}
 rse_gene_SRP071965 <- expand_sra_attributes(rse_gene_SRP071965)
@@ -95,10 +93,15 @@ colData(rse_gene_SRP071965)[
 ]
 ```
 
+Observamos los valores unicos de cada uno de los campos que tiene el experimento
+
 ```{r}
 # Accedemos a los valores unicos de los datos
+print("Group")
 unique(rse_gene_SRP071965$sra_attribute.group) 
+print("Gender")
 unique(rse_gene_SRP071965$sra_attribute.gender)
+print("Ethnicity")
 unique(rse_gene_SRP071965$sra_attribute.ethnicity)
 ```
 
@@ -116,36 +119,46 @@ rse_gene_SRP071965$sra_attribute.ethnicity <- factor(rse_gene_SRP071965$sra_attr
 rse_gene_SRP071965$sra_attribute.gender <- factor(rse_gene_SRP071965$sra_attribute.gender)
 ```
 
-
-
+Observamos la información de cada uno de los campos para proceder con la limpieza de los datos
 
 ```{r}
-## Resumen de las variables de interés
+## Resumen de las variables de interés y mostramos la información relevante de cada campo
 summary(as.data.frame(colData(rse_gene_SRP071965)[
     ,
     grepl("^sra_attribute.[group|age|bin|ethnicity|gender]", colnames(colData(rse_gene_SRP071965)))
 ]))
 ```
 
+Se inspecciona el estado de los pacientes
+
 ```{r}
+#generamos nuestra columna dependiendo de si el paciente es control o caso
 rse_gene_SRP071965$Group <- factor(ifelse(rse_gene_SRP071965$sra_attribute.group == "control (non-progressor)", "Control", "Case"))
 
 table(rse_gene_SRP071965$Group)
 ```
 
+Observamos el conteo de expresión
+
 ```{r}
+# Desplegamos la expresión
 rse_gene_SRP071965$assigned_gene_prop <- rse_gene_SRP071965$recount_qc.gene_fc_count_all.assigned / rse_gene_SRP071965$recount_qc.gene_fc_count_all.total
 summary(rse_gene_SRP071965$assigned_gene_prop)
 ```
 
+Se da un vistazo general de la expresión de los genes en las muestras
+
 ```{r}
+# Realizamos un plot de la expresión
 with(colData(rse_gene_SRP071965), plot(assigned_gene_prop, sra_attribute.bin))
-abline(v=0.60,col = "red")
+abline(v=0.64,col = "red")
 ```
 
 ```{r}
 with(colData(rse_gene_SRP071965), tapply(assigned_gene_prop, Group, summary))
 ```
+
+# Limpieza de muestras
 
 ```{r}
 ## Guardemos nuestro objeto entero por si luego cambiamos de opinión
@@ -153,15 +166,19 @@ rse_gene_SRP071965_unfiltered <- rse_gene_SRP071965
 
 ## Eliminemos a muestras malas
 hist(rse_gene_SRP071965$assigned_gene_prop)
-abline(v=0.6,col="red")
+abline(v=0.64,col="red")
 ```
 
-```{r}
-table(rse_gene_SRP071965$assigned_gene_prop < 0.6)
-```
+Observamos cuantos cumplen con el punto de corte establecido tras la observación
 
 ```{r}
-rse_gene_SRP071965 <- rse_gene_SRP071965[, rse_gene_SRP071965$assigned_gene_prop > 0.6]
+table(rse_gene_SRP071965$assigned_gene_prop < 0.64)
+```
+
+Calculamos los nuevos valores una vez hecho el filtrado de las muestras poco informativas
+
+```{r}
+rse_gene_SRP071965 <- rse_gene_SRP071965[, rse_gene_SRP071965$assigned_gene_prop > 0.64]
 
 ## Calculemos los niveles medios de expresión de los genes en nuestras
 ## muestras.
@@ -171,9 +188,11 @@ gene_means <- rowMeans(assay(rse_gene_SRP071965, "counts"))
 summary(gene_means)
 ```
 
+# Limpieza de genes
+
 ```{r}
 ## Eliminamos genes
-rse_gene_SRP071965 <- rse_gene_SRP071965[gene_means > 0.6, ]
+rse_gene_SRP071965 <- rse_gene_SRP071965[gene_means > 0.01, ]
 
 ## Dimensiones finales
 dim(rse_gene_SRP071965)
@@ -184,7 +203,7 @@ dim(rse_gene_SRP071965)
 dim(rse_gene_SRP071965_unfiltered)
 ```
 
-
+Vemos que debido a la calidad se tuvo que limpiar la mitad de las muestras
 
 ```{r}
 round(nrow(rse_gene_SRP071965) / nrow(rse_gene_SRP071965_unfiltered) * 100, 2)
@@ -256,7 +275,7 @@ volcanoplot(eb_results, coef = 2, highlight = 3, names = de_results$gene_name)
 ```
 
 ```{r}
-de_results[de_results$gene_name %in% c("GBP6", "LIPM", "RP4-620F22.2"), ]
+de_results[de_results$gene_name %in% c("GBP6", "LIPM", "RP5-998N21.4"), ]
 ```
 
 ```{r}
