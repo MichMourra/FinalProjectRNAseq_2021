@@ -1,0 +1,298 @@
+---
+title: "ProyectoFinalRNA"
+output: html_document
+---
+
+# Captura de Datos
+
+## Busqueda de proyectos
+
+```{r}
+library("recount3")
+```
+
+Encontramos todos los proyectos realizados en humanos.
+
+```{r}
+# Capturamos todos los proyectos en humanos
+human_projects <- available_projects()
+```
+
+Vemos cuales son los proyectos que podemos elegir.
+
+```{r}
+# Exploramos los proyectos humanos
+human_projects
+```
+
+Para este caso elegimos el proyecto SRP173312 acerca de eventos de splicing alternativos sobre la regulación del eje hsa-miR-139-5p HNRNPF en nuestro sistema celular.
+
+Para mas información visita NCBI: 
+https://www.ncbi.nlm.nih.gov/sra/SRX3131578[accn]
+
+```{r}
+# Capturamos nuestro proyecto de interes
+rse_gene_ERP012552  <- create_rse(
+    subset(
+        human_projects,
+        project == "ERP012552" & project_type == "data_sources"
+    )
+)
+
+# Exploramos la información de nuestro proyecto
+rse_gene_ERP012552 
+```
+
+Podemos ver que tenemos 63856 genes en 12 muestras 
+
+Con compute_read_counts obtendremos el numero de lecturas para cada una de las muestras en lugar de los datos a nivel de nucleotidos.
+
+```{r}
+# Cambiar el numero de lecturas de nucleotidos a muestras
+assay(rse_gene_ERP012552 , "counts") <- compute_read_counts(rse_gene_ERP012552 )
+```
+
+## Exploramos nuestros datos
+
+Revisamos la información contenida en las columnas
+
+```{r,eval=FALSE}
+head(colData(rse_gene_ERP012552))
+```
+
+Revisamos la información contenida en rowData
+
+```{r,eval=FALSE}
+rowData(rse_gene_ERP012552)
+```
+
+
+La variable de sra.sample_attributes, nos permite ver si la información viene diferente entre las muestras.
+
+```{r}
+rse_gene_ERP012552$sra.sample_attributes[1:5]
+```
+
+
+```{r}
+library("edgeR")
+```
+
+Podemos observar que aquellas lineas donde tuvieron un tratamiento con doxyciclina presentan un campo extra, razon por la cual debemos de eliminar este campo extra.
+
+
+Como la cantidad de campos es igual entre todas las muestras entonces si podemos correr expand_sra_attributes, vidualizando todas las que esten relacionadas con sra_attribute.
+
+```{r}
+rse_gene_ERP012552 <- expand_sra_attributes(rse_gene_ERP012552 )
+
+colData(rse_gene_ERP012552 )[
+    ,
+    grepl("^sra_attribute", colnames(colData(rse_gene_ERP012552 )))
+]
+```
+
+```{r}
+unique(rse_gene_ERP012552$sra_attribute.developmental_stage) 
+```
+
+```{r}
+## Pasar de character a nuemric o factor
+rse_gene_ERP012552$sra_attribute.cell <- as.numeric(rse_gene_ERP012552$sra_attribute.cell)
+
+rse_gene_ERP012552$sra_attribute.organism_part <- factor(rse_gene_ERP012552$sra_attribute.organism_part)
+
+rse_gene_ERP012552$sra_attribute.developmental_stage <- factor(rse_gene_ERP012552$sra_attribute.developmental_stage)
+
+rse_gene_ERP012552$sra_attribute.INSDC_status <- factor(rse_gene_ERP012552$sra_attribute.INSDC_status)
+```
+
+
+
+
+```{r}
+## Resumen de las variables de interés
+summary(as.data.frame(colData(rse_gene_ERP012552)[
+    ,
+    grepl("^sra_attribute.[cell|organism_part|developmental_stage|INSDC_status]", colnames(colData(rse_gene_ERP012552)))
+]))
+```
+
+```{r}
+rse_gene_ERP012552$level <- factor(ifelse(rse_gene_ERP012552$sra_attribute.organism_part == "embryo", "embryo", "Human"))
+
+table(rse_gene_ERP012552$level)
+```
+
+```{r}
+rse_gene_ERP012552$assigned_gene_prop <- rse_gene_ERP012552$recount_qc.gene_fc_count_all.assigned / rse_gene_ERP012552$recount_qc.gene_fc_count_all.total
+summary(rse_gene_ERP012552$assigned_gene_prop)
+```
+
+```{r}
+with(colData(rse_gene_ERP012552), plot(assigned_gene_prop, sra_attribute.cell))
+abline(v=0.2,col = "red")
+```
+
+```{r}
+with(colData(rse_gene_ERP012552), tapply(assigned_gene_prop, level, summary))
+```
+
+```{r}
+## Guardemos nuestro objeto entero por si luego cambiamos de opinión
+rse_gene_ERP012552_unfiltered <- rse_gene_ERP012552
+
+## Eliminemos a muestras malas
+hist(rse_gene_ERP012552$assigned_gene_prop)
+abline(v=0.2,col="red")
+```
+
+```{r}
+table(rse_gene_ERP012552$assigned_gene_prop < 0.2)
+```
+
+```{r}
+rse_gene_ERP012552 <- rse_gene_ERP012552[, rse_gene_ERP012552$assigned_gene_prop > 0.2]
+
+## Calculemos los niveles medios de expresión de los genes en nuestras
+## muestras.
+## Ojo: en un análisis real probablemente haríamos esto con los RPKMs o CPMs
+## en vez de las cuentas.
+gene_means <- rowMeans(assay(rse_gene_ERP012552, "counts"))
+summary(gene_means)
+```
+
+```{r}
+## Eliminamos genes
+rse_gene_ERP012552 <- rse_gene_ERP012552[gene_means > 0.2, ]
+
+## Dimensiones finales
+dim(rse_gene_ERP012552)
+```
+
+```{r}
+## Dimensiones finales
+dim(rse_gene_ERP012552_unfiltered)
+```
+
+
+
+```{r}
+round(nrow(rse_gene_ERP012552) / nrow(rse_gene_ERP012552_unfiltered) * 100, 2)
+```
+
+# Normalización de los datos
+
+```{r}
+library("edgeR") # BiocManager::install("edgeR", update = FALSE)
+dge <- DGEList(
+    counts = assay(rse_gene_ERP012552, "counts"),
+    genes = rowData(rse_gene_ERP012552)
+)
+dge <- calcNormFactors(dge)
+```
+
+
+```{r}
+library("ggplot2")
+ggplot(as.data.frame(colData(rse_gene_ERP012552)), aes(y = assigned_gene_prop, x = level)) +
+    geom_boxplot() +
+    theme_bw(base_size = 20) +
+    ylab("Assigned Gene Prop") +
+    xlab("Life Level")
+```
+```{r}
+mod <- model.matrix(~ level + sra_attribute.cell + sra_attribute.INSDC_status + assigned_gene_prop,
+    data = colData(rse_gene_ERP012552)
+)
+colnames(mod)
+```
+
+```{r}
+library("limma")
+vGene <- voom(dge, mod, plot = TRUE)
+```
+
+```{r}
+eb_results <- eBayes(lmFit(vGene))
+
+de_results <- topTable(
+    eb_results,
+    coef = 2,
+    number = nrow(rse_gene_ERP012552),
+    sort.by = "none"
+)
+dim(de_results)
+```
+
+
+```{r}
+head(de_results)
+```
+
+```{r}
+## Genes diferencialmente expresados entre embrion y humano con FDR < 5%
+table(de_results$adj.P.Val < 0.05)
+```
+
+
+```{r}
+## Visualicemos los resultados estadísticos
+plotMA(eb_results, coef = 2)
+```
+
+```{r}
+volcanoplot(eb_results, coef = 2, highlight = 3, names = de_results$gene_name)
+```
+
+```{r}
+de_results[de_results$gene_name %in% c("RP11-217", "KHDC1L", "SYNCRIP"), ]
+```
+
+```{r}
+## Extraer valores de los genes de interés
+exprs_heatmap <- vGene$E[rank(de_results$adj.P.Val) <= 50, ]
+
+## Creemos una tabla con información de las muestras
+## y con nombres de columnas más amigables
+df <- as.data.frame(colData(rse_gene_ERP012552)[, c("level", "sra_attribute.cell", "sra_attribute.developmental_stage")])
+colnames(df) <- c("Level", "Cell", "Developmental Stage")
+
+## Hagamos un heatmap
+library("pheatmap")
+pheatmap(
+    exprs_heatmap,
+    cluster_rows = TRUE,
+    cluster_cols = TRUE,
+    show_rownames = FALSE,
+    show_colnames = FALSE,
+    annotation_col = df
+)
+```
+
+
+```{r}
+## Para colores
+library("RColorBrewer")
+
+## Conviertiendo los grupos de edad a colores
+col.group <- df$Level
+levels(col.group) <- brewer.pal(nlevels(col.group), "Set1")
+```
+
+```{r}
+col.group <- as.character(col.group)
+
+## MDS por grupos de edad
+plotMDS(vGene$E, labels = df$Level , col = col.group)
+```
+
+```{r}
+index <- which(human_projects$project == "SRP045638")
+
+human_projects[index,]
+```
+
+
+
+
