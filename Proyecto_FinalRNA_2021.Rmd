@@ -1,6 +1,16 @@
 ---
-title: "ProyectoFinalRNA"
-output: html_document
+author: "Carlos Michel Mourra Díaz"
+date: "22/02/21"
+output: 
+  html_document:
+    df_print: paged
+    code_folding: show
+    self_contained: yes
+    theme: yeti
+    highlight: haddock
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
 ---
 
 # Captura de Datos
@@ -57,7 +67,7 @@ Con compute_read_counts obtendremos el numero de lecturas para cada una de las m
 assay(rse_gene_SRP071965 , "counts") <- compute_read_counts(rse_gene_SRP071965)
 ```
 
-## Exploramos nuestros datos
+# Exploración de datos
 
 Si queremos revisar la información contenida en las columnas
 
@@ -82,7 +92,7 @@ rse_gene_SRP071965$sra.sample_attributes[1:4]
 library("edgeR")
 ```
 
-Podemos observar que las lineas poseen la misma cantidad de campos, por lo que podemos proceder a observar la información contenida en las columnas
+Podemos observar que las lineas poseen la misma cantidad de campos, por lo que podemos proceder a observar la información contenida en las columnas por medio de expand_sra_attributes.
 
 ```{r}
 rse_gene_SRP071965 <- expand_sra_attributes(rse_gene_SRP071965)
@@ -93,7 +103,7 @@ colData(rse_gene_SRP071965)[
 ]
 ```
 
-Observamos los valores unicos de cada uno de los campos que tiene el experimento
+Observamos los valores unicos de cada uno de los campos que tiene el experimento, para saber las condiciones a evaluar.
 
 ```{r}
 # Accedemos a los valores unicos de los datos
@@ -104,6 +114,8 @@ unique(rse_gene_SRP071965$sra_attribute.gender)
 print("Ethnicity")
 unique(rse_gene_SRP071965$sra_attribute.ethnicity)
 ```
+
+Debemos fijarnos que hay variables numéricas y factores por lo que debemos hacer una corrección de estos datos. 
 
 ```{r}
 ## Podemos pasar los atributos de edad y bin a variable tipo numerica
@@ -129,7 +141,9 @@ summary(as.data.frame(colData(rse_gene_SRP071965)[
 ]))
 ```
 
-Se inspecciona el estado de los pacientes
+# Análisis de datos
+
+Se inspecciona el estado de las muestras de los pacientes, cuantos corresponden a un paciente control y cuantos tienen el padecimiento.
 
 ```{r}
 #generamos nuestra columna dependiendo de si el paciente es control o caso
@@ -138,7 +152,9 @@ rse_gene_SRP071965$Group <- factor(ifelse(rse_gene_SRP071965$sra_attribute.group
 table(rse_gene_SRP071965$Group)
 ```
 
-Observamos el conteo de expresión
+Basado en las variables de control de calidad se dividira el numero de lecturas asignadas a los genes dividido entre el numero de lecturas totales, esto nos dara la proporción de lecturas asignadas a los genes.
+
+Esto nos indicara cuales son las muestras malas
 
 ```{r}
 # Desplegamos la expresión
@@ -146,7 +162,7 @@ rse_gene_SRP071965$assigned_gene_prop <- rse_gene_SRP071965$recount_qc.gene_fc_c
 summary(rse_gene_SRP071965$assigned_gene_prop)
 ```
 
-Se da un vistazo general de la expresión de los genes en las muestras
+Se da un vistazo general de la expresión de los genes en las muestras, colocando el punto de corte en donde se localiza el primer cuartil.
 
 ```{r}
 # Realizamos un plot de la expresión
@@ -154,11 +170,17 @@ with(colData(rse_gene_SRP071965), plot(assigned_gene_prop, sra_attribute.bin))
 abline(v=0.64,col = "red")
 ```
 
+Con tapply se observara como varian las muestras, dependiendo la condición del paciente donde fue tomada.
+
+Se observa que no hay muchas diferencias entre ambas condiciones
+
 ```{r}
 with(colData(rse_gene_SRP071965), tapply(assigned_gene_prop, Group, summary))
 ```
 
 # Limpieza de muestras
+
+Gracias a la información observada con anterioridad se procedera con la limpieza de las muestras poco informativas. Para esto utilizaremos como punto de corte el primer Cuartil.
 
 ```{r}
 ## Guardemos nuestro objeto entero por si luego cambiamos de opinión
@@ -169,13 +191,13 @@ hist(rse_gene_SRP071965$assigned_gene_prop)
 abline(v=0.64,col="red")
 ```
 
-Observamos cuantos cumplen con el punto de corte establecido tras la observación
+Observamos cuantos cumplen con el punto de corte establecido tras la observación, por lo que esto nos indicaria la cantidad de muestras que seran eliminadas.
 
 ```{r}
 table(rse_gene_SRP071965$assigned_gene_prop < 0.64)
 ```
 
-Calculamos los nuevos valores una vez hecho el filtrado de las muestras poco informativas
+Se calcula los nuevos valores una vez hecho el filtrado de las muestras que no son genes, de esta manera podremos encontrar cuales son lo genes poco informativos y filtrarlos.
 
 ```{r}
 rse_gene_SRP071965 <- rse_gene_SRP071965[, rse_gene_SRP071965$assigned_gene_prop > 0.64]
@@ -190,6 +212,8 @@ summary(gene_means)
 
 # Limpieza de genes
 
+Se realiza la limpieza de los genes poco informativos utilizando el primer cuartil de 0.01 observado.
+
 ```{r}
 ## Eliminamos genes
 rse_gene_SRP071965 <- rse_gene_SRP071965[gene_means > 0.01, ]
@@ -198,12 +222,14 @@ rse_gene_SRP071965 <- rse_gene_SRP071965[gene_means > 0.01, ]
 dim(rse_gene_SRP071965)
 ```
 
+Cantidad de genes antes de hacer el filtrado
+
 ```{r}
 ## Dimensiones finales
 dim(rse_gene_SRP071965_unfiltered)
 ```
 
-Vemos que debido a la calidad se tuvo que limpiar la mitad de las muestras
+Vemos que debido a la calidad se tuvo que limpiar al rededor de un 25% de las muestras.
 
 ```{r}
 round(nrow(rse_gene_SRP071965) / nrow(rse_gene_SRP071965_unfiltered) * 100, 2)
@@ -211,15 +237,30 @@ round(nrow(rse_gene_SRP071965) / nrow(rse_gene_SRP071965_unfiltered) * 100, 2)
 
 # Normalización de los datos
 
+Como existe el problema de que en ambas muestras pueden existir diferente cantidad de genes expresados, podria ocurrir que genes se expresan de la misma manera pero aun asi se detectaria como expresión diferencial. 
+
+Para ello deben normalizarse los datos asumiendo que la mayoria de los genes no se estan expresando diferencialmente.
+
 ```{r,message=FALSE}
+
+# Utilizamos una libreria para normalizar los datos
 library("edgeR") # BiocManager::install("edgeR", update = FALSE)
 dge <- DGEList(
     counts = assay(rse_gene_SRP071965, "counts"),
     genes = rowData(rse_gene_SRP071965)
 )
+
+# Calcular los factores de normalización de acuerdo al artículo del 2010
 dge <- calcNormFactors(dge)
 ```
 
+# Analisis de expresión diferencial con Gráficos
+
+En este caso se realizo un análisis por medio de boxplot, en el cual se pudo ver la diferencia entre la expresión de las muestras en pacientes control y los que poseen.
+
+Existe poca diferencia entre los genes de paciente control y pacientes con el padecimiento de los biomarcadores en sangre.
+
+También se realizaron otros análisis de acuerdo a su genero y su grupo étnico 
 
 ```{r}
 library("ggplot2")
@@ -227,24 +268,65 @@ ggplot(as.data.frame(colData(rse_gene_SRP071965)), aes(y = assigned_gene_prop, x
     geom_boxplot() +
     theme_bw(base_size = 20) +
     ylab("Assigned Gene Prop") +
-    xlab("Life Level")
+    xlab("Patient")
 ```
 
+Igualmente se hace un boxplot para género
+
 ```{r}
+ggplot(as.data.frame(colData(rse_gene_SRP071965)), aes(y = assigned_gene_prop, x = sra_attribute.gender)) +
+    geom_boxplot() +
+    theme_bw(base_size = 20) +
+    ylab("Assigned Gene Prop") +
+    xlab("Gender")
+```
+
+Se hace un boxplot para grupo étnico
+
+```{r}
+ggplot(as.data.frame(colData(rse_gene_SRP071965)), aes(y = assigned_gene_prop, x = sra_attribute.ethnicity)) +
+    geom_boxplot() +
+    theme_bw(base_size = 20) +
+    ylab("Assigned Gene Prop") +
+    xlab("Ethnicity")
+```
+
+Se genera el modelo estadistico de acuerdo con las variables de nuestro interes.
+
+Se Puede ver que se eligio como referencia Case, female y coulored en las condiciones.
+
+```{r}
+# Generar el modelo linear estadistico
 mod <- model.matrix(~ Group + sra_attribute.age + sra_attribute.gender + sra_attribute.ethnicity + sra_attribute.bin + assigned_gene_prop,
     data = colData(rse_gene_SRP071965)
 )
+# Observar las variables que componen nuestro modelo
 colnames(mod)
 ```
 
+Una vez que se tienen las cuentas, se utiliza el paquete limma el cual integra modelos de regresión lineal.
+
+De esta manera se puede obtener mejores estimados de la desviación estandar. 
+
+Los genes que estan abajo de la curva son los de baja expresión.
+
+La gráfica refleja la desviación estandar para cada gen en el eje y, y un valor de expresión de cada gen en escala de log2 en el eje x.
+
+Se debe acercar los genes que estan lejos de la curva roja, por lo que se podra hacer un ajuste.
+
 ```{r}
+# Generamos el plot 
 library("limma")
 vGene <- voom(dge, mod, plot = TRUE)
 ```
 
+Se generará el modelo de regresión lineal y se explorara los resultados de los genes.
+
 ```{r}
+# modelo de regresión lineal con lmfit
 eb_results <- eBayes(lmFit(vGene))
 
+# indicamos el coeficiente de ual es el modelo que nos interesa 
 de_results <- topTable(
     eb_results,
     coef = 2,
@@ -254,31 +336,49 @@ de_results <- topTable(
 dim(de_results)
 ```
 
+Se observan los resultados estadísticos generados por el modelo lineal.
 
 ```{r}
 head(de_results)
 ```
+
+Se inspecciona la cantidad de genes diferencialmente expresados con un p-value adecuado.
 
 ```{r}
 ## Genes diferencialmente expresados entre embrion y humano con FDR < 5%
 table(de_results$adj.P.Val < 0.05)
 ```
 
+Por medio de plotMA se podra graficar el cambio entre control y case, donde valores positivos significa que la expresión es mas alta en case y valores negativos indican que es mas alto en control.
 
 ```{r}
 ## Visualicemos los resultados estadísticos
 plotMA(eb_results, coef = 2)
 ```
 
+Por medio de un volcano plot podemos ver el logfold change en el eje x y el valor  p en el eje y. De este modo se pueden observar los genes con mayor expresión y con mejor valor de p-value.
+
+Se resaltan los 3 genes
+
 ```{r}
+# Generar el plot con 3 genes resaltados
 volcanoplot(eb_results, coef = 2, highlight = 3, names = de_results$gene_name)
 ```
+
+Buscamos la información de los genes con mayor expresión.
 
 ```{r}
 de_results[de_results$gene_name %in% c("GBP6", "LIPM", "RP5-998N21.4"), ]
 ```
 
-```{r}
+Observamos la expresión de los genes dependiendo todas las condiciones que análizamos en nuestro modelo.
+
+Extraemos la información de los primeros 50 genes junto con sus valores de expresión.
+
+De igual manera es posible observar los modulos que se forman entre los genes debido a las condiciones y a los metodos de clustering.
+
+
+```{r pheatmap}
 ## Extraer valores de los genes de interés
 exprs_heatmap <- vGene$E[rank(de_results$adj.P.Val) <= 50, ]
 
@@ -295,6 +395,7 @@ pheatmap(
     cluster_cols = TRUE,
     show_rownames = FALSE,
     show_colnames = FALSE,
+    cex = 0.9,
     annotation_col = df
 )
 ```
@@ -309,6 +410,10 @@ col.group <- df$Group
 levels(col.group) <- brewer.pal(nlevels(col.group), "Set1")
 ```
 
+Por medio de la funcion plotMDS se gráficara la expresión de los genes dependiendo del grupo al que pertenezcan.
+
+Se puede observar que no hay una gran diferencia entre ambos grupos: Control y Case, por lo que indicaria que no hay muchos genes diferencialmente expresados.
+
 ```{r}
 col.group <- as.character(col.group)
 
@@ -317,19 +422,12 @@ plotMDS(vGene$E, labels = df$Group , col = col.group)
 ```
 
 ```{r}
-## Para colores
-library("RColorBrewer")
-
-## Conviertiendo los grupos de edad a colores
-col.group <- df$Group
-levels(col.group) <- brewer.pal(nlevels(col.group), "Set1")
-```
-
-```{r}
 ## Conviertiendo los valores de Sex a colores
 col.sex <- df$Gender
 levels(col.sex) <- brewer.pal(nlevels(col.sex), "Dark2")
 ```
+
+Hacemos lo mismo interpretando las diferencias dependiendo el genero, por lo que vemos que si existe una gran diferencia entre hombres y mujeres. De modo que para este parámetro sería normal encontrar genes diferencialmente expresados.
 
 ```{r}
 col.sex <- as.character(col.sex)
@@ -338,8 +436,27 @@ col.sex <- as.character(col.sex)
 plotMDS(vGene$E, labels = df$Gender, col = col.sex)
 ```
 
+```{r,message=FALSE}
+## Para colores
+library("RColorBrewer")
 
+## Conviertiendo los grupos etnicos a colores
+col.Etni <- df$Ethnicity
+levels(col.Etni) <- brewer.pal(nlevels(col.Etni), "Set1")
+```
 
+Hacemos lo mismo para los grupos etnicos pero vemos que no es muy informativo
+
+```{r}
+col.Etni <- as.character(col.Etni)
+
+## MDS por grupo etnico
+plotMDS(vGene$E, labels = df$Ethnicity, col = col.Etni)
+```
+
+# Conclusión
+
+Por lo que gracias a lo anteriormente observado es posible concluir que si bien existen pocos genes diferencialmente expresados dependiendo de si un paciente es control o presenta el marcador molecular en su sangre. Como quiera podria considerarse que sea posible que estas personas tengan un mayor riesgo de contraer tuberculosis.
 
 
 
